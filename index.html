@@ -360,7 +360,7 @@
       <span id="matchSummary"></span>
       <a id="downloadLink" download="highlighted-heat-sheet.pdf">Download PDF</a>
     </div>
-    <p class="hint" id="downloadHint" style="display:none;">On iPhone/iPad this opens the PDF in a new tab — tap the Share icon, then "Save to Files" to download it.</p>
+    <p class="hint" id="downloadHint" style="display:none;">On iPhone/iPad this opens the PDF in this tab — tap the Share icon, then "Save to Files" to download it, then use your browser's back button to return here.</p>
   </div>
 </main>
 
@@ -765,11 +765,14 @@ generateBtn.addEventListener('click', async () => {
     if (isIOS()) {
       // WebKit (Safari, and every other iOS browser under it) does not
       // reliably honor the download attribute for blob: PDFs — the tap
-      // just does nothing. Opening it instead lets the user Share > Save
-      // to Files from the native PDF viewer.
+      // just does nothing. A blob: URL is also only valid inside the
+      // document that created it, so target="_blank" (a new browsing
+      // context) can't resolve it either and silently fails too. Opening
+      // it in the SAME tab is what actually works; the user can Share >
+      // Save to Files from the native PDF viewer, then go back.
       downloadLink.removeAttribute('download');
-      downloadLink.target = '_blank';
-      downloadLink.rel = 'noopener';
+      downloadLink.removeAttribute('target');
+      downloadLink.removeAttribute('rel');
       downloadLink.textContent = 'Open PDF';
       downloadHint.style.display = 'block';
     } else {
