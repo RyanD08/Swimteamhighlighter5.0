@@ -1,4 +1,4 @@
-run = "python3 -m http.server $PORT"
+run = "python3 -m http.server $PORT || python -m http.server $PORT || npx --yes serve . -l $PORT"
 entrypoint = "index.html"
 
 [[ports]]
