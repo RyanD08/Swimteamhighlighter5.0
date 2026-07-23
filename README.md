@@ -11,11 +11,13 @@ both loaded from a CDN. There is no backend and no build step.
 ## How it works
 
 1. Drop in a heat sheet PDF (must have a real text layer — see Limitations).
-2. Add one or more search terms (swimmer name, team name/abbreviation), each
-   with its own highlight color.
-3. Click **Highlight PDF**. The app scans every page, finds matches, and
+2. The app scans the file for team names and lists them alphabetically in a
+   searchable dropdown — start typing to filter, pick one, and click
+   **Add team**. You can also type any swimmer name or team by hand.
+3. Each entry gets its own highlight color.
+4. Click **Highlight PDF**. The app scans every page, finds matches, and
    draws a highlight box behind each one.
-4. Download the highlighted PDF.
+5. Download the highlighted PDF.
 
 ## Running it locally
 
@@ -26,3 +28,20 @@ No install required — it's a single static HTML file.
 open index.html        # macOS
 start index.html        # Windows
 xdg-open index.html     # Linux
+```
+
+## Running it on Replit
+
+Import this repo into Replit and click **Run** — `.replit` serves the folder
+with `python3 -m http.server`, so no Node install or build step is needed.
+
+## Limitations
+
+- Only text-based PDFs work — scanned/image-only heat sheets have no text
+  layer for pdf.js to read, so nothing will match.
+- Team auto-detection is a best-effort pattern match on the typical
+  Hy-Tek / Meet Mobile "name … age … team … seed time" layout. Sheets with a
+  different layout may find fewer teams (or none) — you can always type a
+  team name manually in that case.
+- Everything runs client-side, so very large PDFs (many pages) can take a
+  little while to scan in-browser.
