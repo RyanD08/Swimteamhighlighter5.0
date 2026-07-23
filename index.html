@@ -360,6 +360,7 @@
       <span id="matchSummary"></span>
       <a id="downloadLink" download="highlighted-heat-sheet.pdf">Download PDF</a>
     </div>
+    <p class="hint" id="downloadHint" style="display:none;">On iPhone/iPad this opens the PDF in a new tab — tap the Share icon, then "Save to Files" to download it.</p>
   </div>
 </main>
 
@@ -392,6 +393,7 @@ const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const matchSummary = document.getElementById('matchSummary');
 const downloadLink = document.getElementById('downloadLink');
+const downloadHint = document.getElementById('downloadHint');
 const teamSelect = document.getElementById('teamSelect');
 const teamOptions = document.getElementById('teamOptions');
 const teamColor = document.getElementById('teamColor');
@@ -552,6 +554,13 @@ function showStatus(msg, type) {
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// iPadOS 13+ reports its platform as "MacIntel" like a real Mac, so touch
+// support is the only reliable signal left to tell them apart.
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 // Groups text items on a page into lines based on shared baseline (y),
@@ -753,7 +762,22 @@ generateBtn.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
 
     downloadLink.href = url;
-    downloadLink.download = `${uploadedName}-highlighted.pdf`;
+    if (isIOS()) {
+      // WebKit (Safari, and every other iOS browser under it) does not
+      // reliably honor the download attribute for blob: PDFs — the tap
+      // just does nothing. Opening it instead lets the user Share > Save
+      // to Files from the native PDF viewer.
+      downloadLink.removeAttribute('download');
+      downloadLink.target = '_blank';
+      downloadLink.rel = 'noopener';
+      downloadLink.textContent = 'Open PDF';
+      downloadHint.style.display = 'block';
+    } else {
+      downloadLink.download = `${uploadedName}-highlighted.pdf`;
+      downloadLink.removeAttribute('target');
+      downloadLink.textContent = 'Download PDF';
+      downloadHint.style.display = 'none';
+    }
 
     if (totalMatches === 0) {
       showStatus('No matches found. Check spelling, name order (Last, First), or try "whole words only" off.', 'err');
