@@ -1,0 +1,9 @@
+run = "npx --yes serve . -l 3000"
+entrypoint = "index.html"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[env]
+PORT = "3000"
