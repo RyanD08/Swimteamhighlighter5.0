@@ -593,8 +593,46 @@ function buildLines(items) {
   return lines;
 }
 
-// Searches each reconstructed line's text for term matches, mapping match
-// positions back to the contributing items' bounding boxes.
+const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}\b|\b\d{1,2}\.\d{2}\b/g;
+const SWIMMER_NAME_RE = /[A-Z][A-Za-z'\-]+,\s*[A-Za-z'\-]+(?:\s+[A-Z]\.?)?/;
+
+// Detects a Hy-Tek/Meet Mobile style entry row ("Last, First ... age ...
+// team ... seed time") on a reconstructed line, returning the text-index
+// span from the start of the swimmer's name through the end of the seed
+// time, so a match anywhere on that row can highlight the whole entry.
+function findEntryBounds(lineText) {
+  const nameMatch = SWIMMER_NAME_RE.exec(lineText);
+  if (!nameMatch) return null;
+
+  SEED_TIME_RE.lastIndex = 0;
+  let lastTime = null;
+  let m;
+  while ((m = SEED_TIME_RE.exec(lineText)) !== null) {
+    lastTime = m;
+  }
+  if (!lastTime) return null;
+
+  const start = nameMatch.index;
+  const end = lastTime.index + lastTime[0].length;
+  if (end <= start) return null;
+
+  return { start, end };
+}
+
+function boundsToRect(offsets, start, end, color, term) {
+  const covering = offsets.filter(o => o.start < end && o.end > start);
+  if (covering.length === 0) return null;
+  const minX = Math.min(...covering.map(o => o.part.x));
+  const maxX = Math.max(...covering.map(o => o.part.x + o.part.width));
+  const minY = Math.min(...covering.map(o => o.part.y));
+  const maxH = Math.max(...covering.map(o => o.part.height));
+  return { x: minX, y: minY, width: maxX - minX, height: maxH, color, term };
+}
+
+// Searches each reconstructed line's text for term matches. When a line
+// looks like a swimmer entry row (name ... seed time), a match anywhere on
+// it highlights the whole row from the start of the name through the seed
+// time instead of just the matched word.
 function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
   const lines = buildLines(items);
   const matches = [];
@@ -602,6 +640,7 @@ function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
   lines.forEach(line => {
     const text = line.text;
     const offsets = line.offsets;
+    const entryBounds = findEntryBounds(text);
 
     terms.forEach(term => {
       const flags = caseSensitive ? 'g' : 'gi';
@@ -614,24 +653,23 @@ function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
       } catch (e) {
         re = new RegExp(escapeRegex(term.text), flags);
       }
+
+      if (entryBounds) {
+        // One match anywhere on the row is enough to highlight the whole
+        // entry; avoid adding the same row more than once for this term.
+        if (re.test(text)) {
+          const rect = boundsToRect(offsets, entryBounds.start, entryBounds.end, term.color, term.text);
+          if (rect) matches.push(rect);
+        }
+        return;
+      }
+
       let m;
       while ((m = re.exec(text)) !== null) {
         const start = m.index;
         const end = m.index + m[0].length;
-        const covering = offsets.filter(o => o.start < end && o.end > start);
-        if (covering.length === 0) continue;
-        const minX = Math.min(...covering.map(o => o.part.x));
-        const maxX = Math.max(...covering.map(o => o.part.x + o.part.width));
-        const minY = Math.min(...covering.map(o => o.part.y));
-        const maxH = Math.max(...covering.map(o => o.part.height));
-        matches.push({
-          x: minX,
-          y: minY,
-          width: maxX - minX,
-          height: maxH,
-          color: term.color,
-          term: term.text
-        });
+        const rect = boundsToRect(offsets, start, end, term.color, term.text);
+        if (rect) matches.push(rect);
         if (re.lastIndex === m.index) re.lastIndex++;
       }
     });
