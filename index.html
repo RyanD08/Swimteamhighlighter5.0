@@ -61,6 +61,8 @@
     max-width:760px;
     margin:-1.4rem auto 3rem;
     padding:0 1.5rem;
+    position:relative;
+    z-index:1;
   }
   .card{
     background:#fff;
@@ -120,6 +122,7 @@
   }
   .term-row input[type="text"]{
     flex:1;
+    min-width:0;
     padding:.65rem .8rem;
     border:1px solid var(--line);
     border-radius:7px;
@@ -147,6 +150,74 @@
     width:100%;
   }
   .add-term:hover{border-color:var(--pool-cyan);color:var(--pool-cyan);}
+  .team-picker{
+    margin-bottom:1rem;
+    padding-bottom:1rem;
+    border-bottom:1px solid var(--line);
+  }
+  .team-picker-label{
+    display:block;
+    font-size:.82rem;
+    font-weight:600;
+    color:var(--ink);
+    margin-bottom:.5rem;
+  }
+  .team-picker-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.6rem;
+  }
+  .team-picker-row input[type="text"]{
+    flex:1;
+    min-width:160px;
+    padding:.65rem .8rem;
+    border:1px solid var(--line);
+    border-radius:7px;
+    font-size:.95rem;
+  }
+  .team-picker-row input[type="text"]:disabled{
+    background:#f4f7f6;
+    color:#9aabb2;
+    cursor:not-allowed;
+  }
+  .team-picker-row input[type="text"]:focus{
+    outline:2px solid var(--pool-cyan);
+    outline-offset:1px;
+    border-color:transparent;
+  }
+  .team-picker-row input[type="color"]{
+    width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:7px;cursor:pointer;background:none;flex-shrink:0;
+  }
+  .team-picker-row .add-team-btn{
+    background:var(--lane-blue);
+    color:#fff;
+    border:none;
+    padding:.65rem 1rem;
+    border-radius:7px;
+    cursor:pointer;
+    font-size:.88rem;
+    font-weight:600;
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+  .team-picker-row .add-team-btn:hover:not(:disabled){background:var(--lane-blue-dark);}
+  .team-picker-row .add-team-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .divider{
+    display:flex;
+    align-items:center;
+    gap:.7rem;
+    margin:1rem 0;
+    color:#8a9aa2;
+    font-size:.78rem;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+  .divider::before, .divider::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
   .options-row{
     display:flex;
     gap:1.2rem;
@@ -257,6 +328,20 @@
 
   <div class="card">
     <h2><span class="lane-num">2</span> Who to highlight</h2>
+
+    <div class="team-picker">
+      <label class="team-picker-label" for="teamSelect">Select a team found in this heat sheet</label>
+      <div class="team-picker-row">
+        <input type="text" id="teamSelect" list="teamOptions" placeholder="Upload a PDF to scan for teams…" disabled autocomplete="off">
+        <datalist id="teamOptions"></datalist>
+        <input type="color" id="teamColor" value="#2fb8c6" title="Highlight color">
+        <button type="button" id="addTeamBtn" class="add-team-btn" disabled>+ Add team</button>
+      </div>
+      <p class="hint" id="teamScanStatus">Upload a heat sheet above and this list will fill in automatically.</p>
+    </div>
+
+    <div class="divider">or type a name/team manually</div>
+
     <div id="termList"></div>
     <button class="add-term" id="addTerm" type="button">+ Add another swimmer or team</button>
     <div class="options-row">
@@ -279,12 +364,20 @@
 </main>
 
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js".replace("pdf.min.js","pdf.worker.min.js");
-
-const { PDFDocument, rgb } = PDFLib;
+// Guard library setup so a slow/blocked CDN can't stop the rest of the
+// page (term rows, buttons, etc.) from initializing.
+function librariesReady() {
+  return !!(window.pdfjsLib && window.PDFLib);
+}
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+const PDFDocument = window.PDFLib && window.PDFLib.PDFDocument;
+const rgb = window.PDFLib && window.PDFLib.rgb;
 
 let uploadedBytes = null;
 let uploadedName = "heat-sheet";
+let cachedPdfjsDoc = null;
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -299,16 +392,21 @@ const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const matchSummary = document.getElementById('matchSummary');
 const downloadLink = document.getElementById('downloadLink');
+const teamSelect = document.getElementById('teamSelect');
+const teamOptions = document.getElementById('teamOptions');
+const teamColor = document.getElementById('teamColor');
+const addTeamBtn = document.getElementById('addTeamBtn');
+const teamScanStatus = document.getElementById('teamScanStatus');
 
 const DEFAULT_COLORS = ['#f2c14e', '#2fb8c6', '#f28c8c', '#8cd98c', '#c9a6f2'];
 
-function addTermRow(prefill = '') {
+function addTermRow(prefill = '', color = '') {
   const row = document.createElement('div');
   row.className = 'term-row';
   const colorIndex = termList.children.length % DEFAULT_COLORS.length;
   row.innerHTML = `
-    <input type="text" placeholder="Swimmer name or team (e.g. Smith, Jane or LANE)" value="${prefill}">
-    <input type="color" value="${DEFAULT_COLORS[colorIndex]}">
+    <input type="text" placeholder="Swimmer name or team (e.g. Smith, Jane or LANE)" value="${prefill.replace(/"/g, '&quot;')}">
+    <input type="color" value="${color || DEFAULT_COLORS[colorIndex]}">
     <button class="remove" type="button" title="Remove">×</button>
   `;
   row.querySelector('.remove').addEventListener('click', () => {
@@ -320,6 +418,17 @@ function addTermRow(prefill = '') {
 }
 addTermRow();
 addTermBtn.addEventListener('click', () => addTermRow());
+
+addTeamBtn.addEventListener('click', () => {
+  const value = teamSelect.value.trim();
+  if (!value) return;
+  addTermRow(value, teamColor.value);
+  teamSelect.value = '';
+  validateReady();
+});
+teamSelect.addEventListener('input', () => {
+  addTeamBtn.disabled = teamSelect.value.trim().length === 0;
+});
 
 function getTerms() {
   const rows = [...termList.querySelectorAll('.term-row')];
@@ -348,11 +457,22 @@ fileInput.addEventListener('change', e => {
 });
 clearFile.addEventListener('click', () => {
   uploadedBytes = null;
+  cachedPdfjsDoc = null;
   fileInput.value = '';
   fileChip.classList.remove('show');
   resultEl.classList.remove('show');
+  resetTeamPicker();
   validateReady();
 });
+
+function resetTeamPicker() {
+  teamSelect.value = '';
+  teamSelect.disabled = true;
+  teamSelect.placeholder = 'Upload a PDF to scan for teams…';
+  addTeamBtn.disabled = true;
+  teamOptions.innerHTML = '';
+  teamScanStatus.textContent = 'Upload a heat sheet above and this list will fill in automatically.';
+}
 
 async function handleFile(file) {
   if (file.type !== 'application/pdf') {
@@ -366,6 +486,63 @@ async function handleFile(file) {
   resultEl.classList.remove('show');
   statusEl.classList.remove('show');
   validateReady();
+  scanForTeams(uploadedBytes.slice());
+}
+
+// Loads the PDF's text once, then looks for the "<age> <team name> <seed
+// time>" pattern common to Hy-Tek / Meet Mobile heat sheets to build a
+// searchable, alphabetized list of teams in the file.
+async function scanForTeams(bytes) {
+  resetTeamPicker();
+  teamScanStatus.textContent = 'Scanning heat sheet for teams…';
+
+  if (!window.pdfjsLib) {
+    teamScanStatus.textContent = 'Team auto-detect unavailable (PDF library did not load). You can still type any name or team below.';
+    return;
+  }
+
+  try {
+    cachedPdfjsDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const teams = new Set();
+
+    for (let pageNum = 1; pageNum <= cachedPdfjsDoc.numPages; pageNum++) {
+      const page = await cachedPdfjsDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const lines = buildLines(textContent.items);
+      lines.forEach(line => {
+        extractTeamNames(line.text).forEach(name => teams.add(name));
+      });
+    }
+
+    const sortedTeams = [...teams].sort((a, b) => a.localeCompare(b));
+    teamOptions.innerHTML = sortedTeams.map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+
+    if (sortedTeams.length > 0) {
+      teamSelect.disabled = false;
+      teamSelect.placeholder = 'Type to search teams…';
+      teamScanStatus.textContent = `${sortedTeams.length} team${sortedTeams.length === 1 ? '' : 's'} found — search or pick one above, then click "Add team".`;
+    } else {
+      teamScanStatus.textContent = 'No teams auto-detected from this PDF — you can still type any name or team below.';
+    }
+  } catch (err) {
+    console.error(err);
+    teamScanStatus.textContent = 'Could not auto-detect teams from this PDF. You can still type any name or team below.';
+  }
+}
+
+// Best-effort extraction of team names from a reconstructed line of heat
+// sheet text: entries are typically "<age> <team name> <seed time>".
+function extractTeamNames(lineText) {
+  const found = [];
+  const re = /\b\d{1,2}\s+([A-Z][A-Za-z0-9&'.\-]*(?:[ \-][A-Z][A-Za-z0-9&'.\-]*){0,4})\s+(?:NT|DQ|SCR|\d{1,2}:\d{2}\.\d{2}|\d{1,2}\.\d{2})\b/g;
+  let m;
+  while ((m = re.exec(lineText)) !== null) {
+    const candidate = m[1].trim();
+    if (candidate.length >= 2 && candidate.length <= 40 && !/^\d+$/.test(candidate)) {
+      found.push(candidate);
+    }
+  }
+  return found;
 }
 
 function showStatus(msg, type) {
@@ -378,9 +555,8 @@ function escapeRegex(s) {
 }
 
 // Groups text items on a page into lines based on shared baseline (y),
-// then searches the reconstructed line text for term matches, mapping
-// match positions back to the contributing items' bounding boxes.
-function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
+// and reconstructs each line's text with gap-aware spacing between items.
+function buildLines(items) {
   const lines = [];
   const yTolerance = 2.5;
 
@@ -397,8 +573,6 @@ function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
     line.parts.push({ str: item.str, x, y, width, height });
   });
 
-  const matches = [];
-
   lines.forEach(line => {
     line.parts.sort((a, b) => a.x - b.x);
     let text = '';
@@ -412,6 +586,61 @@ function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
       offsets.push({ start: text.length, end: text.length + part.str.length, part });
       text += part.str;
     });
+    line.text = text;
+    line.offsets = offsets;
+  });
+
+  return lines;
+}
+
+const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}\b|\b\d{1,2}\.\d{2}\b/g;
+const SWIMMER_NAME_RE = /[A-Z][A-Za-z'\-]+,\s*[A-Za-z'\-]+(?:\s+[A-Z]\.?)?/;
+
+// Detects a Hy-Tek/Meet Mobile style entry row ("Last, First ... age ...
+// team ... seed time") on a reconstructed line, returning the text-index
+// span from the start of the swimmer's name through the end of the seed
+// time, so a match anywhere on that row can highlight the whole entry.
+function findEntryBounds(lineText) {
+  const nameMatch = SWIMMER_NAME_RE.exec(lineText);
+  if (!nameMatch) return null;
+
+  SEED_TIME_RE.lastIndex = 0;
+  let lastTime = null;
+  let m;
+  while ((m = SEED_TIME_RE.exec(lineText)) !== null) {
+    lastTime = m;
+  }
+  if (!lastTime) return null;
+
+  const start = nameMatch.index;
+  const end = lastTime.index + lastTime[0].length;
+  if (end <= start) return null;
+
+  return { start, end };
+}
+
+function boundsToRect(offsets, start, end, color, term) {
+  const covering = offsets.filter(o => o.start < end && o.end > start);
+  if (covering.length === 0) return null;
+  const minX = Math.min(...covering.map(o => o.part.x));
+  const maxX = Math.max(...covering.map(o => o.part.x + o.part.width));
+  const minY = Math.min(...covering.map(o => o.part.y));
+  const maxH = Math.max(...covering.map(o => o.part.height));
+  return { x: minX, y: minY, width: maxX - minX, height: maxH, color, term };
+}
+
+// Searches each reconstructed line's text for term matches. When a line
+// looks like a swimmer entry row (name ... seed time), a match anywhere on
+// it highlights the whole row from the start of the name through the seed
+// time instead of just the matched word.
+function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
+  const lines = buildLines(items);
+  const matches = [];
+
+  lines.forEach(line => {
+    const text = line.text;
+    const offsets = line.offsets;
+    const entryBounds = findEntryBounds(text);
 
     terms.forEach(term => {
       const flags = caseSensitive ? 'g' : 'gi';
@@ -424,24 +653,23 @@ function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
       } catch (e) {
         re = new RegExp(escapeRegex(term.text), flags);
       }
+
+      if (entryBounds) {
+        // One match anywhere on the row is enough to highlight the whole
+        // entry; avoid adding the same row more than once for this term.
+        if (re.test(text)) {
+          const rect = boundsToRect(offsets, entryBounds.start, entryBounds.end, term.color, term.text);
+          if (rect) matches.push(rect);
+        }
+        return;
+      }
+
       let m;
       while ((m = re.exec(text)) !== null) {
         const start = m.index;
         const end = m.index + m[0].length;
-        const covering = offsets.filter(o => o.start < end && o.end > start);
-        if (covering.length === 0) continue;
-        const minX = Math.min(...covering.map(o => o.part.x));
-        const maxX = Math.max(...covering.map(o => o.part.x + o.part.width));
-        const minY = Math.min(...covering.map(o => o.part.y));
-        const maxH = Math.max(...covering.map(o => o.part.height));
-        matches.push({
-          x: minX,
-          y: minY,
-          width: maxX - minX,
-          height: maxH,
-          color: term.color,
-          term: term.text
-        });
+        const rect = boundsToRect(offsets, start, end, term.color, term.text);
+        if (rect) matches.push(rect);
         if (re.lastIndex === m.index) re.lastIndex++;
       }
     });
@@ -463,6 +691,11 @@ generateBtn.addEventListener('click', async () => {
   const terms = getTerms();
   if (!uploadedBytes || terms.length === 0) return;
 
+  if (!librariesReady()) {
+    showStatus('The PDF libraries this app needs did not load (check your internet connection), then refresh the page and try again.', 'err');
+    return;
+  }
+
   generateBtn.disabled = true;
   resultEl.classList.remove('show');
   progressEl.classList.add('show');
@@ -473,7 +706,8 @@ generateBtn.addEventListener('click', async () => {
     const wholeWord = document.getElementById('wholeWord').checked;
     const caseSensitive = document.getElementById('caseSensitive').checked;
 
-    const pdfjsDoc = await pdfjsLib.getDocument({ data: uploadedBytes.slice() }).promise;
+    const pdfjsDoc = cachedPdfjsDoc || await pdfjsLib.getDocument({ data: uploadedBytes.slice() }).promise;
+    cachedPdfjsDoc = pdfjsDoc;
     const numPages = pdfjsDoc.numPages;
 
     const pdfLibDoc = await PDFDocument.load(uploadedBytes.slice());
@@ -538,6 +772,12 @@ generateBtn.addEventListener('click', async () => {
     generateBtn.disabled = false;
   }
 });
+
+setTimeout(() => {
+  if (!librariesReady()) {
+    showStatus('Could not load the PDF libraries from the CDN. Check your internet connection and refresh the page.', 'err');
+  }
+}, 5000);
 </script>
 </body>
 </html>
