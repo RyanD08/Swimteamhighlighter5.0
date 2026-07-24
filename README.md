@@ -1,4 +1,10 @@
-# Heat Sheet Highlighter
+# Swim Sense
+
+`index.html` is the Swim Sense home page — it's what loads first, with a
+**Resources** section linking out to each tool. Today that's just the Heat
+Sheet Highlighter (`highlighter.html`).
+
+## Heat Sheet Highlighter
 
 Upload a swim meet heat sheet PDF, enter the swimmers or teams you want to
 find, and get back a copy of the PDF with every match highlighted.
@@ -21,10 +27,10 @@ both loaded from a CDN. There is no backend and no build step.
 
 ## Running it locally
 
-No install required — it's a single static HTML file.
+No install required — it's static HTML/CSS/JS, no build step.
 
 ```bash
-# Just open it directly
+# Just open the home page directly
 open index.html        # macOS
 start index.html        # Windows
 xdg-open index.html     # Linux

@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heat Sheet Highlighter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  :root{
+    --lane-blue:#0b3d5c;
+    --lane-blue-dark:#062a40;
+    --pool-cyan:#2fb8c6;
+    --lane-yellow:#f2c14e;
+    --chalk:#f4f7f6;
+    --ink:#0c2230;
+    --line:#d7e2e4;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--chalk);
+    color:var(--ink);
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    min-height:100vh;
+  }
+  header{
+    background:linear-gradient(180deg,var(--lane-blue) 0%,var(--lane-blue-dark) 100%);
+    color:var(--chalk);
+    padding:2.2rem 1.5rem 2.6rem;
+    position:relative;
+    overflow:hidden;
+  }
+  header::after{
+    content:"";
+    position:absolute;
+    left:0;right:0;bottom:0;
+    height:6px;
+    background:repeating-linear-gradient(90deg,var(--lane-yellow) 0 24px,transparent 24px 40px);
+    opacity:.85;
+  }
+  header h1{
+    margin:0 0 .3rem;
+    font-size:1.9rem;
+    letter-spacing:.02em;
+    max-width:640px;
+  }
+  .back-link{
+    display:inline-block;
+    color:#bcd6e3;
+    text-decoration:none;
+    font-size:.85rem;
+    font-weight:600;
+    margin-bottom:.9rem;
+  }
+  .back-link:hover{color:#fff;}
+  header p{
+    margin:0;
+    color:#bcd6e3;
+    max-width:520px;
+    line-height:1.5;
+    font-size:.95rem;
+  }
+  .lane-num{
+    font-variant-numeric:tabular-nums;
+    color:var(--pool-cyan);
+    font-weight:700;
+  }
+  main{
+    max-width:760px;
+    margin:-1.4rem auto 3rem;
+    padding:0 1.5rem;
+    position:relative;
+    z-index:1;
+  }
+  .card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:1.5rem;
+    margin-bottom:1.25rem;
+    box-shadow:0 1px 2px rgba(12,34,48,.04);
+  }
+  .card h2{
+    font-size:.78rem;
+    text-transform:uppercase;
+    letter-spacing:.09em;
+    color:var(--lane-blue);
+    margin:0 0 1rem;
+    display:flex;
+    align-items:center;
+    gap:.5rem;
+  }
+  .card h2 .lane-num{font-size:.9rem;}
+  .dropzone{
+    border:2px dashed var(--line);
+    border-radius:8px;
+    padding:2rem 1rem;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--pool-cyan);
+    background:#f0fbfc;
+  }
+  .dropzone p{margin:.2rem 0;color:#5b7280;font-size:.9rem;}
+  .dropzone strong{color:var(--ink);}
+  #fileInput{display:none;}
+  .file-chip{
+    display:none;
+    align-items:center;
+    gap:.6rem;
+    background:#f0fbfc;
+    border:1px solid #cdeef2;
+    border-radius:8px;
+    padding:.6rem .9rem;
+    font-size:.88rem;
+  }
+  .file-chip.show{display:flex;}
+  .file-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--pool-cyan);flex-shrink:0;}
+  .file-chip button{
+    margin-left:auto;
+    background:none;border:none;color:#8a6d00;cursor:pointer;font-size:.82rem;
+    text-decoration:underline;
+  }
+  .term-row{
+    display:flex;
+    gap:.6rem;
+    margin-bottom:.7rem;
+  }
+  .term-row input[type="text"]{
+    flex:1;
+    min-width:0;
+    padding:.65rem .8rem;
+    border:1px solid var(--line);
+    border-radius:7px;
+    font-size:.95rem;
+  }
+  .term-row input[type="text"]:focus{
+    outline:2px solid var(--pool-cyan);
+    outline-offset:1px;
+    border-color:transparent;
+  }
+  .term-row input[type="color"]{
+    width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:7px;cursor:pointer;background:none;
+  }
+  .term-row .remove{
+    background:none;border:none;color:#a24444;cursor:pointer;font-size:1.1rem;padding:0 .3rem;
+  }
+  .add-term{
+    background:none;
+    border:1px dashed var(--line);
+    color:var(--lane-blue);
+    padding:.55rem .9rem;
+    border-radius:7px;
+    cursor:pointer;
+    font-size:.88rem;
+    width:100%;
+  }
+  .add-term:hover{border-color:var(--pool-cyan);color:var(--pool-cyan);}
+  .team-picker{
+    margin-bottom:1rem;
+    padding-bottom:1rem;
+    border-bottom:1px solid var(--line);
+  }
+  .team-picker-label{
+    display:block;
+    font-size:.82rem;
+    font-weight:600;
+    color:var(--ink);
+    margin-bottom:.5rem;
+  }
+  .team-picker-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.6rem;
+  }
+  .team-picker-row input[type="text"]{
+    flex:1;
+    min-width:160px;
+    padding:.65rem .8rem;
+    border:1px solid var(--line);
+    border-radius:7px;
+    font-size:.95rem;
+  }
+  .team-picker-row input[type="text"]:disabled{
+    background:#f4f7f6;
+    color:#9aabb2;
+    cursor:not-allowed;
+  }
+  .team-picker-row input[type="text"]:focus{
+    outline:2px solid var(--pool-cyan);
+    outline-offset:1px;
+    border-color:transparent;
+  }
+  .team-picker-row input[type="color"]{
+    width:42px;height:42px;padding:0;border:1px solid var(--line);border-radius:7px;cursor:pointer;background:none;flex-shrink:0;
+  }
+  .team-picker-row .add-team-btn{
+    background:var(--lane-blue);
+    color:#fff;
+    border:none;
+    padding:.65rem 1rem;
+    border-radius:7px;
+    cursor:pointer;
+    font-size:.88rem;
+    font-weight:600;
+    white-space:nowrap;
+    flex-shrink:0;
+  }
+  .team-picker-row .add-team-btn:hover:not(:disabled){background:var(--lane-blue-dark);}
+  .team-picker-row .add-team-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .divider{
+    display:flex;
+    align-items:center;
+    gap:.7rem;
+    margin:1rem 0;
+    color:#8a9aa2;
+    font-size:.78rem;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+  .divider::before, .divider::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+  .options-row{
+    display:flex;
+    gap:1.2rem;
+    margin-top:1rem;
+    font-size:.85rem;
+    color:#425a68;
+    flex-wrap:wrap;
+  }
+  .options-row label{display:flex;align-items:center;gap:.4rem;cursor:pointer;}
+  .go{
+    width:100%;
+    padding:.9rem;
+    background:var(--pool-cyan);
+    color:#04303a;
+    font-weight:700;
+    letter-spacing:.02em;
+    border:none;
+    border-radius:8px;
+    font-size:1rem;
+    cursor:pointer;
+    transition:background .15s, opacity .15s;
+  }
+  .go:hover:not(:disabled){background:#26a4b1;}
+  .go:disabled{opacity:.45;cursor:not-allowed;}
+  .status{
+    margin-top:.9rem;
+    font-size:.88rem;
+    color:#425a68;
+    display:none;
+  }
+  .status.show{display:block;}
+  .status.err{color:#a24444;}
+  .status.ok{color:#1c7a52;}
+  progress{
+    width:100%;
+    height:6px;
+    margin-top:.5rem;
+    accent-color:var(--pool-cyan);
+    display:none;
+  }
+  progress.show{display:block;}
+  .result{
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    background:#f0fbf5;
+    border:1px solid #c9ecd8;
+    border-radius:8px;
+    padding:.9rem 1rem;
+    margin-top:1rem;
+    font-size:.9rem;
+  }
+  .result.show{display:flex;}
+  .result a{
+    background:var(--lane-blue);
+    color:#fff;
+    text-decoration:none;
+    padding:.55rem 1rem;
+    border-radius:6px;
+    font-size:.85rem;
+    font-weight:600;
+  }
+  .result a:hover{background:var(--lane-blue-dark);}
+  .hint{font-size:.78rem;color:#7d92a0;margin-top:.6rem;line-height:1.5;}
+  .privacy{
+    display:flex;
+    gap:.6rem;
+    font-size:.82rem;
+    color:#5b7280;
+    align-items:flex-start;
+    background:#f7fafa;
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:.8rem 1rem;
+    margin-bottom:1.25rem;
+  }
+  .privacy .dot{
+    width:8px;height:8px;border-radius:50%;background:#1c7a52;margin-top:.4rem;flex-shrink:0;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="back-link" href="index.html">&larr; Swim Sense</a>
+  <h1><span class="lane-num">4</span> Heat Sheet Highlighter</h1>
+  <p>Upload a heat sheet PDF, mark the swimmers or teams you want to find, and get back a copy with every match highlighted — entirely in your browser.</p>
+</header>
+
+<main>
+  <div class="privacy">
+    <span class="dot"></span>
+    <span>Your file never leaves this browser tab. Everything — reading the PDF and drawing the highlights — happens on your device, not on a server.</span>
+  </div>
+
+  <div class="card">
+    <h2><span class="lane-num">1</span> Upload heat sheet</h2>
+    <div class="dropzone" id="dropzone">
+      <p><strong>Click to choose a PDF</strong> or drag one here</p>
+      <p>Only text-based PDFs are supported (most Hy-Tek / Meet Mobile heat sheets qualify)</p>
+    </div>
+    <input type="file" id="fileInput" accept="application/pdf">
+    <div class="file-chip" id="fileChip">
+      <span class="dot"></span>
+      <span id="fileName"></span>
+      <button id="clearFile" type="button">remove</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="lane-num">2</span> Who to highlight</h2>
+
+    <div class="team-picker">
+      <label class="team-picker-label" for="teamSelect">Select a team found in this heat sheet</label>
+      <div class="team-picker-row">
+        <input type="text" id="teamSelect" list="teamOptions" placeholder="Upload a PDF to scan for teams…" disabled autocomplete="off">
+        <datalist id="teamOptions"></datalist>
+        <input type="color" id="teamColor" value="#2fb8c6" title="Highlight color">
+        <button type="button" id="addTeamBtn" class="add-team-btn" disabled>+ Add team</button>
+      </div>
+      <p class="hint" id="teamScanStatus">Upload a heat sheet above and this list will fill in automatically.</p>
+    </div>
+
+    <div class="divider">or type a name/team manually</div>
+
+    <div id="termList"></div>
+    <button class="add-term" id="addTerm" type="button">+ Add another swimmer or team</button>
+    <div class="options-row">
+      <label><input type="checkbox" id="wholeWord" checked> Match whole words only</label>
+      <label><input type="checkbox" id="caseSensitive"> Case sensitive</label>
+    </div>
+    <p class="hint">Tip: names may appear as "Last, First" on the sheet — try both orders if a swimmer isn't found. Team names/abbreviations work too.</p>
+  </div>
+
+  <div class="card">
+    <h2><span class="lane-num">3</span> Generate</h2>
+    <button class="go" id="generateBtn" disabled>Highlight PDF</button>
+    <progress id="progress" max="100" value="0"></progress>
+    <div class="status" id="status"></div>
+    <div class="result" id="result">
+      <span id="matchSummary"></span>
+      <a id="downloadLink" download="highlighted-heat-sheet.pdf">Download PDF</a>
+    </div>
+  </div>
+</main>
+
+<script>
+// Guard library setup so a slow/blocked CDN can't stop the rest of the
+// page (term rows, buttons, etc.) from initializing.
+function librariesReady() {
+  return !!(window.pdfjsLib && window.PDFLib);
+}
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+const PDFDocument = window.PDFLib && window.PDFLib.PDFDocument;
+const rgb = window.PDFLib && window.PDFLib.rgb;
+
+let uploadedBytes = null;
+let uploadedName = "heat-sheet";
+let cachedPdfjsDoc = null;
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileChip = document.getElementById('fileChip');
+const fileName = document.getElementById('fileName');
+const clearFile = document.getElementById('clearFile');
+const termList = document.getElementById('termList');
+const addTermBtn = document.getElementById('addTerm');
+const generateBtn = document.getElementById('generateBtn');
+const progressEl = document.getElementById('progress');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const matchSummary = document.getElementById('matchSummary');
+const downloadLink = document.getElementById('downloadLink');
+const teamSelect = document.getElementById('teamSelect');
+const teamOptions = document.getElementById('teamOptions');
+const teamColor = document.getElementById('teamColor');
+const addTeamBtn = document.getElementById('addTeamBtn');
+const teamScanStatus = document.getElementById('teamScanStatus');
+
+const DEFAULT_COLORS = ['#f2c14e', '#2fb8c6', '#f28c8c', '#8cd98c', '#c9a6f2'];
+
+function addTermRow(prefill = '', color = '') {
+  const row = document.createElement('div');
+  row.className = 'term-row';
+  const colorIndex = termList.children.length % DEFAULT_COLORS.length;
+  row.innerHTML = `
+    <input type="text" placeholder="Swimmer name or team (e.g. Smith, Jane or LANE)" value="${prefill.replace(/"/g, '&quot;')}">
+    <input type="color" value="${color || DEFAULT_COLORS[colorIndex]}">
+    <button class="remove" type="button" title="Remove">×</button>
+  `;
+  row.querySelector('.remove').addEventListener('click', () => {
+    row.remove();
+    validateReady();
+  });
+  row.querySelector('input[type="text"]').addEventListener('input', validateReady);
+  termList.appendChild(row);
+}
+addTermRow();
+addTermBtn.addEventListener('click', () => addTermRow());
+
+addTeamBtn.addEventListener('click', () => {
+  const value = teamSelect.value.trim();
+  if (!value) return;
+  addTermRow(value, teamColor.value);
+  teamSelect.value = '';
+  validateReady();
+});
+teamSelect.addEventListener('input', () => {
+  addTeamBtn.disabled = teamSelect.value.trim().length === 0;
+});
+
+function getTerms() {
+  const rows = [...termList.querySelectorAll('.term-row')];
+  return rows
+    .map(r => ({
+      text: r.querySelector('input[type="text"]').value.trim(),
+      color: r.querySelector('input[type="color"]').value
+    }))
+    .filter(t => t.text.length > 0);
+}
+
+function validateReady() {
+  generateBtn.disabled = !(uploadedBytes && getTerms().length > 0);
+}
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+clearFile.addEventListener('click', () => {
+  uploadedBytes = null;
+  cachedPdfjsDoc = null;
+  fileInput.value = '';
+  fileChip.classList.remove('show');
+  resultEl.classList.remove('show');
+  resetTeamPicker();
+  validateReady();
+});
+
+function resetTeamPicker() {
+  teamSelect.value = '';
+  teamSelect.disabled = true;
+  teamSelect.placeholder = 'Upload a PDF to scan for teams…';
+  addTeamBtn.disabled = true;
+  teamOptions.innerHTML = '';
+  teamScanStatus.textContent = 'Upload a heat sheet above and this list will fill in automatically.';
+}
+
+async function handleFile(file) {
+  if (file.type !== 'application/pdf') {
+    showStatus('Please upload a PDF file.', 'err');
+    return;
+  }
+  uploadedBytes = new Uint8Array(await file.arrayBuffer());
+  uploadedName = file.name.replace(/\.pdf$/i, '');
+  fileName.textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB)`;
+  fileChip.classList.add('show');
+  resultEl.classList.remove('show');
+  statusEl.classList.remove('show');
+  validateReady();
+  scanForTeams(uploadedBytes.slice());
+}
+
+// Loads the PDF's text once, then looks for the "<age> <team name> <seed
+// time>" pattern common to Hy-Tek / Meet Mobile heat sheets to build a
+// searchable, alphabetized list of teams in the file.
+async function scanForTeams(bytes) {
+  resetTeamPicker();
+  teamScanStatus.textContent = 'Scanning heat sheet for teams…';
+
+  if (!window.pdfjsLib) {
+    teamScanStatus.textContent = 'Team auto-detect unavailable (PDF library did not load). You can still type any name or team below.';
+    return;
+  }
+
+  try {
+    cachedPdfjsDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const teams = new Set();
+
+    for (let pageNum = 1; pageNum <= cachedPdfjsDoc.numPages; pageNum++) {
+      const page = await cachedPdfjsDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const lines = buildLines(textContent.items);
+      lines.forEach(line => {
+        extractTeamNames(line.text).forEach(name => teams.add(name));
+      });
+    }
+
+    const sortedTeams = [...teams].sort((a, b) => a.localeCompare(b));
+    teamOptions.innerHTML = sortedTeams.map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+
+    if (sortedTeams.length > 0) {
+      teamSelect.disabled = false;
+      teamSelect.placeholder = 'Type to search teams…';
+      teamScanStatus.textContent = `${sortedTeams.length} team${sortedTeams.length === 1 ? '' : 's'} found — search or pick one above, then click "Add team".`;
+    } else {
+      teamScanStatus.textContent = 'No teams auto-detected from this PDF — you can still type any name or team below.';
+    }
+  } catch (err) {
+    console.error(err);
+    teamScanStatus.textContent = 'Could not auto-detect teams from this PDF. You can still type any name or team below.';
+  }
+}
+
+// Best-effort extraction of team names from a reconstructed line of heat
+// sheet text: entries are typically "<age> <team name> <seed time>". Each
+// continuation word requires 2+ characters so a standalone relay letter
+// ("... Racing-VA A 1:45.32") isn't swallowed into the team name.
+function extractTeamNames(lineText) {
+  const found = [];
+  const re = /\b\d{1,2}\s+([A-Z][A-Za-z0-9&'.\-]*(?:[ \-][A-Z][A-Za-z0-9&'.\-]+){0,4})\s+(?:NT|DQ|SCR|\d{1,2}:\d{2}\.\d{2}|\d{1,2}\.\d{2})\b/g;
+  let m;
+  while ((m = re.exec(lineText)) !== null) {
+    const candidate = m[1].trim();
+    if (candidate.length >= 2 && candidate.length <= 40 && !/^\d+$/.test(candidate)) {
+      found.push(candidate);
+    }
+  }
+  return found;
+}
+
+function showStatus(msg, type) {
+  statusEl.textContent = msg;
+  statusEl.className = `status show ${type || ''}`;
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Groups text items on a page into lines based on shared baseline (y),
+// and reconstructs each line's text with gap-aware spacing between items.
+const ENTRY_END_RE = /^(?:NT|DQ|SCR|_+|\d{1,2}:\d{2}\.\d{2}[A-Z]?|\d{1,2}\.\d{2}[A-Z]?)$/;
+const ROW_START_RE = /^\d{1,3}$/;
+
+// Heat sheets are commonly laid out as two (or more) side-by-side event
+// tables per page, flowing independently like newspaper columns — so two
+// unrelated rows routinely land on the very same baseline, merging into
+// one garbled line if grouped purely by y-coordinate. A genuine second
+// entry starting mid-line is recognizable on its own terms: the token
+// right before the split ends an entry (a seed time, or NT/DQ/SCR) and
+// the token right after it is a bare rank number, the way every table
+// row — individual or relay — begins. Splitting only where this specific
+// local pattern appears (rather than some page-wide x threshold) avoids
+// cutting apart legitimate rows that never collided with anything, since
+// row width varies a lot between individual-swimmer and relay tables.
+function splitMergedRow(parts) {
+  const segments = [];
+  let segStart = 0;
+  for (let i = 1; i < parts.length; i++) {
+    const prev = parts[i - 1];
+    const cur = parts[i];
+    const gap = cur.x - (prev.x + prev.width);
+    if (gap > 15 && ENTRY_END_RE.test(prev.str.trim()) && ROW_START_RE.test(cur.str.trim())) {
+      segments.push(parts.slice(segStart, i));
+      segStart = i;
+    }
+  }
+  segments.push(parts.slice(segStart));
+  return segments;
+}
+
+// Groups text items on a page into lines based on shared baseline (y),
+// splitting a line further wherever it looks like two merged table rows
+// (see splitMergedRow), and reconstructs each resulting line's text with
+// gap-aware spacing between items.
+function buildLines(items) {
+  const lines = [];
+  const yTolerance = 2.5;
+  const rawRows = [];
+
+  items.forEach(item => {
+    const x = item.transform[4];
+    const y = item.transform[5];
+    const height = item.height || Math.abs(item.transform[3]) || 10;
+    const width = item.width || 0;
+    let row = rawRows.find(r => Math.abs(r.y - y) < yTolerance);
+    if (!row) {
+      row = { y, parts: [] };
+      rawRows.push(row);
+    }
+    row.parts.push({ str: item.str, x, y, width, height });
+  });
+
+  rawRows.forEach(row => {
+    row.parts.sort((a, b) => a.x - b.x);
+    splitMergedRow(row.parts).forEach(segParts => {
+      let text = '';
+      const offsets = [];
+      segParts.forEach((part, i) => {
+        if (i > 0) {
+          const prev = segParts[i - 1];
+          const gap = part.x - (prev.x + prev.width);
+          if (gap > prev.height * 0.15 && !text.endsWith(' ')) text += ' ';
+        }
+        offsets.push({ start: text.length, end: text.length + part.str.length, part });
+        text += part.str;
+      });
+      lines.push({ y: row.y, text, offsets });
+    });
+  });
+
+  return lines;
+}
+
+const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}[A-Z]?\b|\b\d{1,2}\.\d{2}[A-Z]?\b/g;
+const SWIMMER_NAME_RE = /[A-Z][A-Za-z'\-]+,\s*[A-Za-z'\-]+(?:\s+[A-Z]\.?)?/;
+const LEADING_NUM_RE = /^\s*\d{1,3}\s+/;
+const RELAY_LETTER_RE = /(?:^|\s)['"‘’]?([A-Z])['"’‘]?(?=\s|$)/g;
+
+// Finds the seed time nearest to (at or after) a given text index, rather
+// than just the last time-shaped token on the whole line — on a wide row
+// (e.g. two entries sharing a baseline) a later, unrelated time can sit
+// further right, and the highlight should stop at this entry's own time.
+function findNextTime(lineText, fromIndex) {
+  SEED_TIME_RE.lastIndex = 0;
+  let m;
+  while ((m = SEED_TIME_RE.exec(lineText)) !== null) {
+    if (m.index >= fromIndex) return m;
+    if (SEED_TIME_RE.lastIndex === m.index) SEED_TIME_RE.lastIndex++;
+  }
+  return null;
+}
+
+// Detects a relay row: a team name followed further along by a standalone
+// relay letter (quoted or bare, e.g. "Riverside Racing-VA 'A'"), then that
+// relay's seed time. Without this, a relay row has no "Last, First" name
+// for findEntryBounds to anchor on, so it falls through to the fallback
+// matched-text-only highlight.
+function findRelayBounds(lineText) {
+  const leadingMatch = LEADING_NUM_RE.exec(lineText);
+  const start = leadingMatch ? leadingMatch[0].length : 0;
+  if (start >= lineText.length) return null;
+
+  RELAY_LETTER_RE.lastIndex = 0;
+  let marker = null;
+  let m;
+  while ((m = RELAY_LETTER_RE.exec(lineText)) !== null) {
+    const letterIndex = m.index + m[0].indexOf(m[1]);
+    // Require some team-name-looking text before the letter so a lone
+    // leading initial isn't mistaken for a relay marker.
+    if (letterIndex > start + 2) {
+      marker = m;
+      break;
+    }
+    if (RELAY_LETTER_RE.lastIndex === m.index) RELAY_LETTER_RE.lastIndex++;
+  }
+  if (!marker) return null;
+
+  const time = findNextTime(lineText, marker.index + marker[0].length);
+  if (!time) return null;
+
+  const end = time.index + time[0].length;
+  if (end <= start) return null;
+
+  return { start, end };
+}
+
+// Detects a Hy-Tek/Meet Mobile style entry row on a reconstructed line —
+// either a swimmer ("Last, First ... age ... team ... seed time") or a
+// relay ("team ... 'A' ... seed time") — returning the text-index span
+// from the start of the name/team through the end of that entry's own
+// seed time, so a match anywhere on it highlights the whole row.
+function findEntryBounds(lineText) {
+  const nameMatch = SWIMMER_NAME_RE.exec(lineText);
+  if (nameMatch) {
+    const time = findNextTime(lineText, nameMatch.index + nameMatch[0].length);
+    if (time) {
+      const end = time.index + time[0].length;
+      if (end > nameMatch.index) return { start: nameMatch.index, end };
+    }
+  }
+  return findRelayBounds(lineText);
+}
+
+function boundsToRect(offsets, start, end, color, term) {
+  const covering = offsets.filter(o => o.start < end && o.end > start);
+  if (covering.length === 0) return null;
+  const minX = Math.min(...covering.map(o => o.part.x));
+  const maxX = Math.max(...covering.map(o => o.part.x + o.part.width));
+  const minY = Math.min(...covering.map(o => o.part.y));
+  const maxH = Math.max(...covering.map(o => o.part.height));
+  return { x: minX, y: minY, width: maxX - minX, height: maxH, color, term };
+}
+
+// Searches each reconstructed line's text for term matches. When a line
+// looks like a swimmer entry row (name ... seed time), a match anywhere on
+// it highlights the whole row from the start of the name through the seed
+// time instead of just the matched word.
+function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
+  const lines = buildLines(items);
+  const matches = [];
+
+  lines.forEach(line => {
+    const text = line.text;
+    const offsets = line.offsets;
+    const entryBounds = findEntryBounds(text);
+
+    terms.forEach(term => {
+      const flags = caseSensitive ? 'g' : 'gi';
+      const pattern = wholeWord
+        ? `(?<![A-Za-z0-9])${escapeRegex(term.text)}(?![A-Za-z0-9])`
+        : escapeRegex(term.text);
+      let re;
+      try {
+        re = new RegExp(pattern, flags);
+      } catch (e) {
+        re = new RegExp(escapeRegex(term.text), flags);
+      }
+
+      if (entryBounds) {
+        // One match anywhere on the row is enough to highlight the whole
+        // entry; avoid adding the same row more than once for this term.
+        if (re.test(text)) {
+          const rect = boundsToRect(offsets, entryBounds.start, entryBounds.end, term.color, term.text);
+          if (rect) matches.push(rect);
+        }
+        return;
+      }
+
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const start = m.index;
+        const end = m.index + m[0].length;
+        const rect = boundsToRect(offsets, start, end, term.color, term.text);
+        if (rect) matches.push(rect);
+        if (re.lastIndex === m.index) re.lastIndex++;
+      }
+    });
+  });
+
+  return matches;
+}
+
+function hexToRgb01(hex) {
+  const h = hex.replace('#', '');
+  return {
+    r: parseInt(h.substring(0, 2), 16) / 255,
+    g: parseInt(h.substring(2, 4), 16) / 255,
+    b: parseInt(h.substring(4, 6), 16) / 255
+  };
+}
+
+generateBtn.addEventListener('click', async () => {
+  const terms = getTerms();
+  if (!uploadedBytes || terms.length === 0) return;
+
+  if (!librariesReady()) {
+    showStatus('The PDF libraries this app needs did not load (check your internet connection), then refresh the page and try again.', 'err');
+    return;
+  }
+
+  generateBtn.disabled = true;
+  resultEl.classList.remove('show');
+  progressEl.classList.add('show');
+  progressEl.value = 5;
+  showStatus('Reading PDF text…', '');
+
+  try {
+    const wholeWord = document.getElementById('wholeWord').checked;
+    const caseSensitive = document.getElementById('caseSensitive').checked;
+
+    const pdfjsDoc = cachedPdfjsDoc || await pdfjsLib.getDocument({ data: uploadedBytes.slice() }).promise;
+    cachedPdfjsDoc = pdfjsDoc;
+    const numPages = pdfjsDoc.numPages;
+
+    const pdfLibDoc = await PDFDocument.load(uploadedBytes.slice());
+    const pdfLibPages = pdfLibDoc.getPages();
+
+    let totalMatches = 0;
+    const perTermCounts = {};
+    terms.forEach(t => perTermCounts[t.text] = 0);
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      progressEl.value = 5 + Math.round((pageNum / numPages) * 85);
+      showStatus(`Scanning page ${pageNum} of ${numPages}…`, '');
+
+      const page = await pdfjsDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const matches = findMatchesOnPage(textContent.items, terms, wholeWord, caseSensitive);
+
+      const pdfLibPage = pdfLibPages[pageNum - 1];
+      const padX = 1.5;
+      const padY = 1.5;
+
+      matches.forEach(match => {
+        const { r, g, b } = hexToRgb01(match.color);
+        pdfLibPage.drawRectangle({
+          x: match.x - padX,
+          y: match.y - padY,
+          width: match.width + padX * 2,
+          height: match.height + padY * 2,
+          color: rgb(r, g, b),
+          opacity: 0.45,
+          borderWidth: 0
+        });
+        totalMatches++;
+        perTermCounts[match.term] = (perTermCounts[match.term] || 0) + 1;
+      });
+    }
+
+    progressEl.value = 95;
+    showStatus('Building highlighted PDF…', '');
+
+    const outBytes = await pdfLibDoc.save();
+    const blob = new Blob([outBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+
+    downloadLink.href = url;
+    downloadLink.download = `${uploadedName}-highlighted.pdf`;
+
+    if (totalMatches === 0) {
+      showStatus('No matches found. Check spelling, name order (Last, First), or try "whole words only" off.', 'err');
+    } else {
+      const breakdown = terms.map(t => `${t.text}: ${perTermCounts[t.text]}`).join(' · ');
+      matchSummary.textContent = `${totalMatches} match${totalMatches === 1 ? '' : 'es'} highlighted (${breakdown})`;
+      resultEl.classList.add('show');
+      showStatus('Done.', 'ok');
+    }
+  } catch (err) {
+    console.error(err);
+    showStatus('Something went wrong reading that PDF. It may be a scanned image without a text layer.', 'err');
+  } finally {
+    progressEl.value = 100;
+    setTimeout(() => progressEl.classList.remove('show'), 500);
+    generateBtn.disabled = false;
+  }
+});
+
+setTimeout(() => {
+  if (!librariesReady()) {
+    showStatus('Could not load the PDF libraries from the CDN. Check your internet connection and refresh the page.', 'err');
+  }
+}, 5000);
+</script>
+</body>
+</html>
