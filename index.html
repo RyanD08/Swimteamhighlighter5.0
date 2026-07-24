@@ -360,7 +360,6 @@
       <span id="matchSummary"></span>
       <a id="downloadLink" download="highlighted-heat-sheet.pdf">Download PDF</a>
     </div>
-    <p class="hint" id="downloadHint" style="display:none;">On iPhone/iPad this opens the PDF in this tab — tap the Share icon, then "Save to Files" to download it, then use your browser's back button to return here.</p>
   </div>
 </main>
 
@@ -393,7 +392,6 @@ const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const matchSummary = document.getElementById('matchSummary');
 const downloadLink = document.getElementById('downloadLink');
-const downloadHint = document.getElementById('downloadHint');
 const teamSelect = document.getElementById('teamSelect');
 const teamOptions = document.getElementById('teamOptions');
 const teamColor = document.getElementById('teamColor');
@@ -533,10 +531,12 @@ async function scanForTeams(bytes) {
 }
 
 // Best-effort extraction of team names from a reconstructed line of heat
-// sheet text: entries are typically "<age> <team name> <seed time>".
+// sheet text: entries are typically "<age> <team name> <seed time>". Each
+// continuation word requires 2+ characters so a standalone relay letter
+// ("... Racing-VA A 1:45.32") isn't swallowed into the team name.
 function extractTeamNames(lineText) {
   const found = [];
-  const re = /\b\d{1,2}\s+([A-Z][A-Za-z0-9&'.\-]*(?:[ \-][A-Z][A-Za-z0-9&'.\-]*){0,4})\s+(?:NT|DQ|SCR|\d{1,2}:\d{2}\.\d{2}|\d{1,2}\.\d{2})\b/g;
+  const re = /\b\d{1,2}\s+([A-Z][A-Za-z0-9&'.\-]*(?:[ \-][A-Z][A-Za-z0-9&'.\-]+){0,4})\s+(?:NT|DQ|SCR|\d{1,2}:\d{2}\.\d{2}|\d{1,2}\.\d{2})\b/g;
   let m;
   while ((m = re.exec(lineText)) !== null) {
     const candidate = m[1].trim();
@@ -554,13 +554,6 @@ function showStatus(msg, type) {
 
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// iPadOS 13+ reports its platform as "MacIntel" like a real Mac, so touch
-// support is the only reliable signal left to tell them apart.
-function isIOS() {
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 // Groups text items on a page into lines based on shared baseline (y),
@@ -604,28 +597,72 @@ function buildLines(items) {
 
 const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}\b|\b\d{1,2}\.\d{2}\b/g;
 const SWIMMER_NAME_RE = /[A-Z][A-Za-z'\-]+,\s*[A-Za-z'\-]+(?:\s+[A-Z]\.?)?/;
+const LEADING_NUM_RE = /^\s*\d{1,3}\s+/;
+const RELAY_LETTER_RE = /(?:^|\s)['"‘’]?([A-Z])['"’‘]?(?=\s|$)/g;
 
-// Detects a Hy-Tek/Meet Mobile style entry row ("Last, First ... age ...
-// team ... seed time") on a reconstructed line, returning the text-index
-// span from the start of the swimmer's name through the end of the seed
-// time, so a match anywhere on that row can highlight the whole entry.
-function findEntryBounds(lineText) {
-  const nameMatch = SWIMMER_NAME_RE.exec(lineText);
-  if (!nameMatch) return null;
-
+// Finds the seed time nearest to (at or after) a given text index, rather
+// than just the last time-shaped token on the whole line — on a wide row
+// (e.g. two entries sharing a baseline) a later, unrelated time can sit
+// further right, and the highlight should stop at this entry's own time.
+function findNextTime(lineText, fromIndex) {
   SEED_TIME_RE.lastIndex = 0;
-  let lastTime = null;
   let m;
   while ((m = SEED_TIME_RE.exec(lineText)) !== null) {
-    lastTime = m;
+    if (m.index >= fromIndex) return m;
+    if (SEED_TIME_RE.lastIndex === m.index) SEED_TIME_RE.lastIndex++;
   }
-  if (!lastTime) return null;
+  return null;
+}
 
-  const start = nameMatch.index;
-  const end = lastTime.index + lastTime[0].length;
+// Detects a relay row: a team name followed further along by a standalone
+// relay letter (quoted or bare, e.g. "Riverside Racing-VA 'A'"), then that
+// relay's seed time. Without this, a relay row has no "Last, First" name
+// for findEntryBounds to anchor on, so it falls through to the fallback
+// matched-text-only highlight.
+function findRelayBounds(lineText) {
+  const leadingMatch = LEADING_NUM_RE.exec(lineText);
+  const start = leadingMatch ? leadingMatch[0].length : 0;
+  if (start >= lineText.length) return null;
+
+  RELAY_LETTER_RE.lastIndex = 0;
+  let marker = null;
+  let m;
+  while ((m = RELAY_LETTER_RE.exec(lineText)) !== null) {
+    const letterIndex = m.index + m[0].indexOf(m[1]);
+    // Require some team-name-looking text before the letter so a lone
+    // leading initial isn't mistaken for a relay marker.
+    if (letterIndex > start + 2) {
+      marker = m;
+      break;
+    }
+    if (RELAY_LETTER_RE.lastIndex === m.index) RELAY_LETTER_RE.lastIndex++;
+  }
+  if (!marker) return null;
+
+  const time = findNextTime(lineText, marker.index + marker[0].length);
+  if (!time) return null;
+
+  const end = time.index + time[0].length;
   if (end <= start) return null;
 
   return { start, end };
+}
+
+// Detects a Hy-Tek/Meet Mobile style entry row on a reconstructed line —
+// either a swimmer ("Last, First ... age ... team ... seed time") or a
+// relay ("team ... 'A' ... seed time") — returning the text-index span
+// from the start of the name/team through the end of that entry's own
+// seed time, so a match anywhere on it highlights the whole row.
+function findEntryBounds(lineText) {
+  const nameMatch = SWIMMER_NAME_RE.exec(lineText);
+  if (nameMatch) {
+    const time = findNextTime(lineText, nameMatch.index + nameMatch[0].length);
+    if (time) {
+      const end = time.index + time[0].length;
+      if (end > nameMatch.index) return { start: nameMatch.index, end };
+    }
+  }
+  return findRelayBounds(lineText);
 }
 
 function boundsToRect(offsets, start, end, color, term) {
@@ -762,25 +799,7 @@ generateBtn.addEventListener('click', async () => {
     const url = URL.createObjectURL(blob);
 
     downloadLink.href = url;
-    if (isIOS()) {
-      // WebKit (Safari, and every other iOS browser under it) does not
-      // reliably honor the download attribute for blob: PDFs — the tap
-      // just does nothing. A blob: URL is also only valid inside the
-      // document that created it, so target="_blank" (a new browsing
-      // context) can't resolve it either and silently fails too. Opening
-      // it in the SAME tab is what actually works; the user can Share >
-      // Save to Files from the native PDF viewer, then go back.
-      downloadLink.removeAttribute('download');
-      downloadLink.removeAttribute('target');
-      downloadLink.removeAttribute('rel');
-      downloadLink.textContent = 'Open PDF';
-      downloadHint.style.display = 'block';
-    } else {
-      downloadLink.download = `${uploadedName}-highlighted.pdf`;
-      downloadLink.removeAttribute('target');
-      downloadLink.textContent = 'Download PDF';
-      downloadHint.style.display = 'none';
-    }
+    downloadLink.download = `${uploadedName}-highlighted.pdf`;
 
     if (totalMatches === 0) {
       showStatus('No matches found. Check spelling, name order (Last, First), or try "whole words only" off.', 'err');
