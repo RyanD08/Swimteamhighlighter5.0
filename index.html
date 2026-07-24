@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Swim Sense</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&display=swap" rel="stylesheet">
 <style>
   :root{
     --lane-blue:#0b3d5c;
@@ -28,6 +31,7 @@
     padding:3rem 1.5rem 2.6rem;
     position:relative;
     overflow:hidden;
+    text-align:center;
   }
   header::after{
     content:"";
@@ -38,13 +42,17 @@
     opacity:.85;
   }
   header h1{
-    margin:0 0 .4rem;
-    font-size:2.4rem;
-    letter-spacing:.02em;
+    margin:0 0 .6rem;
+    font-family:'Bungee',system-ui,sans-serif;
+    font-weight:400;
+    font-size:3rem;
+    letter-spacing:.03em;
     max-width:640px;
+    margin-left:auto;
+    margin-right:auto;
   }
   header p{
-    margin:0;
+    margin:0 auto;
     color:#bcd6e3;
     max-width:520px;
     line-height:1.5;

@@ -46,14 +46,20 @@
     max-width:640px;
   }
   .back-link{
-    display:inline-block;
-    color:#bcd6e3;
+    display:inline-flex;
+    align-items:center;
+    gap:.4rem;
+    color:var(--chalk);
     text-decoration:none;
     font-size:.85rem;
-    font-weight:600;
-    margin-bottom:.9rem;
+    font-weight:700;
+    margin-bottom:1rem;
+    background:rgba(255,255,255,.12);
+    border:1px solid rgba(255,255,255,.35);
+    border-radius:7px;
+    padding:.5rem .9rem;
   }
-  .back-link:hover{color:#fff;}
+  .back-link:hover{background:rgba(255,255,255,.2);border-color:#fff;}
   header p{
     margin:0;
     color:#bcd6e3;
@@ -311,7 +317,7 @@
 <body>
 
 <header>
-  <a class="back-link" href="index.html">&larr; Swim Sense</a>
+  <a class="back-link" href="index.html">&larr; Return to Homepage</a>
   <h1><span class="lane-num">4</span> Heat Sheet Highlighter</h1>
   <p>Upload a heat sheet PDF, mark the swimmers or teams you want to find, and get back a copy with every match highlighted — entirely in your browser.</p>
 </header>
