@@ -508,7 +508,7 @@ async function scanForTeams(bytes) {
     for (let pageNum = 1; pageNum <= cachedPdfjsDoc.numPages; pageNum++) {
       const page = await cachedPdfjsDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const lines = buildLinesForPage(textContent.items, page.view[2] - page.view[0]);
+      const lines = buildLines(textContent.items);
       lines.forEach(line => {
         extractTeamNames(line.text).forEach(name => teams.add(name));
       });
@@ -558,116 +558,80 @@ function escapeRegex(s) {
 
 // Groups text items on a page into lines based on shared baseline (y),
 // and reconstructs each line's text with gap-aware spacing between items.
+const ENTRY_END_RE = /^(?:NT|DQ|SCR|_+|\d{1,2}:\d{2}\.\d{2}[A-Z]?|\d{1,2}\.\d{2}[A-Z]?)$/;
+const ROW_START_RE = /^\d{1,3}$/;
+
+// Heat sheets are commonly laid out as two (or more) side-by-side event
+// tables per page, flowing independently like newspaper columns — so two
+// unrelated rows routinely land on the very same baseline, merging into
+// one garbled line if grouped purely by y-coordinate. A genuine second
+// entry starting mid-line is recognizable on its own terms: the token
+// right before the split ends an entry (a seed time, or NT/DQ/SCR) and
+// the token right after it is a bare rank number, the way every table
+// row — individual or relay — begins. Splitting only where this specific
+// local pattern appears (rather than some page-wide x threshold) avoids
+// cutting apart legitimate rows that never collided with anything, since
+// row width varies a lot between individual-swimmer and relay tables.
+function splitMergedRow(parts) {
+  const segments = [];
+  let segStart = 0;
+  for (let i = 1; i < parts.length; i++) {
+    const prev = parts[i - 1];
+    const cur = parts[i];
+    const gap = cur.x - (prev.x + prev.width);
+    if (gap > 15 && ENTRY_END_RE.test(prev.str.trim()) && ROW_START_RE.test(cur.str.trim())) {
+      segments.push(parts.slice(segStart, i));
+      segStart = i;
+    }
+  }
+  segments.push(parts.slice(segStart));
+  return segments;
+}
+
+// Groups text items on a page into lines based on shared baseline (y),
+// splitting a line further wherever it looks like two merged table rows
+// (see splitMergedRow), and reconstructs each resulting line's text with
+// gap-aware spacing between items.
 function buildLines(items) {
   const lines = [];
   const yTolerance = 2.5;
+  const rawRows = [];
 
   items.forEach(item => {
     const x = item.transform[4];
     const y = item.transform[5];
     const height = item.height || Math.abs(item.transform[3]) || 10;
     const width = item.width || 0;
-    let line = lines.find(l => Math.abs(l.y - y) < yTolerance);
-    if (!line) {
-      line = { y, parts: [] };
-      lines.push(line);
-    }
-    line.parts.push({ str: item.str, x, y, width, height });
-  });
-
-  lines.forEach(line => {
-    line.parts.sort((a, b) => a.x - b.x);
-    let text = '';
-    const offsets = [];
-    line.parts.forEach((part, i) => {
-      if (i > 0) {
-        const prev = line.parts[i - 1];
-        const gap = part.x - (prev.x + prev.width);
-        if (gap > prev.height * 0.15 && !text.endsWith(' ')) text += ' ';
-      }
-      offsets.push({ start: text.length, end: text.length + part.str.length, part });
-      text += part.str;
-    });
-    line.text = text;
-    line.offsets = offsets;
-  });
-
-  return lines;
-}
-
-// Heat sheets are commonly laid out as two (or more) side-by-side event
-// tables per page, flowing independently like newspaper columns — so two
-// unrelated rows routinely land on the very same baseline. Grouping text
-// purely by y-coordinate merges them into one garbled line. A wide gap in
-// a row's own text isn't reliable evidence of the true gutter by itself:
-// generators like Hy-Tek's often right-pad a table's own columns (e.g.
-// Team -> Relay -> Seed Time) with gaps just as wide, sometimes wider,
-// than the actual gutter between tables. What's reliable is *where* the
-// gutter sits: consistently close to the page's horizontal center, while
-// intra-table column gaps sit well off to one side. Some PDF exports also
-// encode inter-word spacing as literal space characters with an inflated
-// width covering most of a line — those must be excluded, or they paper
-// over the very gap being looked for.
-function splitColumns(items, pageWidth) {
-  if (items.length < 2 || !pageWidth) return [items];
-
-  const nonWhitespace = items.filter(it => (it.str || '').trim() !== '');
-  if (nonWhitespace.length < 2) return [items];
-
-  const yTolerance = 2.5;
-  const rows = [];
-  nonWhitespace.forEach(item => {
-    const x = item.transform[4];
-    const y = item.transform[5];
-    const width = item.width || 0;
-    let row = rows.find(r => Math.abs(r.y - y) < yTolerance);
+    let row = rawRows.find(r => Math.abs(r.y - y) < yTolerance);
     if (!row) {
       row = { y, parts: [] };
-      rows.push(row);
+      rawRows.push(row);
     }
-    row.parts.push({ x, x2: x + width });
+    row.parts.push({ str: item.str, x, y, width, height });
   });
 
-  const lo = pageWidth * 0.35, hi = pageWidth * 0.65;
-  const centeredGaps = [];
-  rows.forEach(row => {
+  rawRows.forEach(row => {
     row.parts.sort((a, b) => a.x - b.x);
-    for (let i = 1; i < row.parts.length; i++) {
-      const gap = row.parts[i].x - row.parts[i - 1].x2;
-      if (gap <= 15) continue;
-      const mid = (row.parts[i - 1].x2 + row.parts[i].x) / 2;
-      if (mid >= lo && mid <= hi) centeredGaps.push(mid);
-    }
+    splitMergedRow(row.parts).forEach(segParts => {
+      let text = '';
+      const offsets = [];
+      segParts.forEach((part, i) => {
+        if (i > 0) {
+          const prev = segParts[i - 1];
+          const gap = part.x - (prev.x + prev.width);
+          if (gap > prev.height * 0.15 && !text.endsWith(' ')) text += ' ';
+        }
+        offsets.push({ start: text.length, end: text.length + part.str.length, part });
+        text += part.str;
+      });
+      lines.push({ y: row.y, text, offsets });
+    });
   });
 
-  // Require at least a couple of rows to agree before trusting a split;
-  // a single stray centered gap isn't enough evidence on its own.
-  if (centeredGaps.length < 2) return [items];
-
-  centeredGaps.sort((a, b) => a - b);
-  const mid = Math.floor(centeredGaps.length / 2);
-  const gutterX = centeredGaps.length % 2 === 0
-    ? (centeredGaps[mid - 1] + centeredGaps[mid]) / 2
-    : centeredGaps[mid];
-
-  const left = items.filter(it => it.transform[4] < gutterX);
-  const right = items.filter(it => it.transform[4] >= gutterX);
-  if (left.length === 0 || right.length === 0) return [items];
-  return [left, right];
-}
-
-// Splits a page's items into column groups (if any) and reconstructs
-// lines within each group separately, so lines never merge across a
-// table gutter.
-function buildLinesForPage(items, pageWidth) {
-  let lines = [];
-  splitColumns(items, pageWidth).forEach(columnItems => {
-    lines = lines.concat(buildLines(columnItems));
-  });
   return lines;
 }
 
-const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}\b|\b\d{1,2}\.\d{2}\b/g;
+const SEED_TIME_RE = /\b(?:NT|DQ|SCR)\b|\b\d{1,2}:\d{2}\.\d{2}[A-Z]?\b|\b\d{1,2}\.\d{2}[A-Z]?\b/g;
 const SWIMMER_NAME_RE = /[A-Z][A-Za-z'\-]+,\s*[A-Za-z'\-]+(?:\s+[A-Z]\.?)?/;
 const LEADING_NUM_RE = /^\s*\d{1,3}\s+/;
 const RELAY_LETTER_RE = /(?:^|\s)['"‘’]?([A-Z])['"’‘]?(?=\s|$)/g;
@@ -751,8 +715,8 @@ function boundsToRect(offsets, start, end, color, term) {
 // looks like a swimmer entry row (name ... seed time), a match anywhere on
 // it highlights the whole row from the start of the name through the seed
 // time instead of just the matched word.
-function findMatchesOnPage(items, terms, wholeWord, caseSensitive, pageWidth) {
-  const lines = buildLinesForPage(items, pageWidth);
+function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
+  const lines = buildLines(items);
   const matches = [];
 
   lines.forEach(line => {
@@ -841,7 +805,7 @@ generateBtn.addEventListener('click', async () => {
 
       const page = await pdfjsDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const matches = findMatchesOnPage(textContent.items, terms, wholeWord, caseSensitive, page.view[2] - page.view[0]);
+      const matches = findMatchesOnPage(textContent.items, terms, wholeWord, caseSensitive);
 
       const pdfLibPage = pdfLibPages[pageNum - 1];
       const padX = 1.5;
