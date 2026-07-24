@@ -508,7 +508,7 @@ async function scanForTeams(bytes) {
     for (let pageNum = 1; pageNum <= cachedPdfjsDoc.numPages; pageNum++) {
       const page = await cachedPdfjsDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const lines = buildLines(textContent.items);
+      const lines = buildLinesForPage(textContent.items);
       lines.forEach(line => {
         extractTeamNames(line.text).forEach(name => teams.add(name));
       });
@@ -592,6 +592,88 @@ function buildLines(items) {
     line.offsets = offsets;
   });
 
+  return lines;
+}
+
+// Heat sheets are commonly laid out as two (or more) side-by-side event
+// tables per page. Grouping text purely by y-coordinate merges an
+// unrelated row from one table with a row at the same height in another,
+// corrupting both. This finds a wide gap in the page's horizontal text
+// coverage that looks like the empty gutter between tables, and splits
+// items into separate column groups along it before any line-grouping
+// happens. A wide gap alone isn't enough evidence, though — the gap
+// between a table's own Team and Seed Time columns can be just as wide.
+// The real test is whether existing same-baseline rows ever straddle the
+// gap: a genuine gutter has (almost) no row reaching across it, while an
+// intra-table column gap has most/every row spanning across it.
+function splitColumns(items) {
+  if (items.length < 2) return [items];
+
+  const yTolerance = 2.5;
+  const rawRows = [];
+  items.forEach(item => {
+    const x = item.transform[4];
+    const y = item.transform[5];
+    const width = item.width || 0;
+    let row = rawRows.find(r => Math.abs(r.y - y) < yTolerance);
+    if (!row) {
+      rawRows.push({ y, minX: x, maxX: x + width });
+    } else {
+      row.minX = Math.min(row.minX, x);
+      row.maxX = Math.max(row.maxX, x + width);
+    }
+  });
+
+  const intervals = items
+    .map(it => [it.transform[4], it.transform[4] + (it.width || 0)])
+    .sort((a, b) => a[0] - b[0]);
+  const merged = [intervals[0].slice()];
+  for (let i = 1; i < intervals.length; i++) {
+    const [s, e] = intervals[i];
+    const last = merged[merged.length - 1];
+    if (s <= last[1] + 4) {
+      last[1] = Math.max(last[1], e);
+    } else {
+      merged.push([s, e]);
+    }
+  }
+  if (merged.length < 2) return [items];
+
+  const totalSpread = merged[merged.length - 1][1] - merged[0][0];
+  const gaps = [];
+  for (let i = 1; i < merged.length; i++) {
+    gaps.push({ gap: merged[i][0] - merged[i - 1][1], start: merged[i - 1][1], end: merged[i][0] });
+  }
+  gaps.sort((a, b) => b.gap - a.gap);
+
+  for (const candidate of gaps) {
+    // The gutter between two separate tables is reliably much wider than
+    // the gap between columns within one table, so require it to clear
+    // both an absolute and a relative bar; gaps are sorted widest-first,
+    // so once one fails the size bar, the rest will too.
+    if (candidate.gap < 50 || candidate.gap < totalSpread * 0.08) break;
+
+    const gutterMid = (candidate.start + candidate.end) / 2;
+    const straddling = rawRows.filter(r => r.minX < gutterMid && r.maxX > gutterMid).length;
+    if (rawRows.length > 0 && straddling / rawRows.length > 0.15) continue;
+
+    const left = items.filter(it => it.transform[4] < gutterMid);
+    const right = items.filter(it => it.transform[4] >= gutterMid);
+    if (left.length === 0 || right.length === 0) continue;
+    return [left, right];
+  }
+
+  return [items];
+}
+
+// Splits a page's items into column groups (if any) and reconstructs
+// lines within each group separately, so lines never merge across a
+// table gutter.
+function buildLinesForPage(items) {
+  let lines = [];
+  splitColumns(items).forEach(columnItems => {
+    lines = lines.concat(buildLines(columnItems));
+  });
   return lines;
 }
 
@@ -680,7 +762,7 @@ function boundsToRect(offsets, start, end, color, term) {
 // it highlights the whole row from the start of the name through the seed
 // time instead of just the matched word.
 function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
-  const lines = buildLines(items);
+  const lines = buildLinesForPage(items);
   const matches = [];
 
   lines.forEach(line => {
