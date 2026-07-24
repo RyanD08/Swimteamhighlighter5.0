@@ -508,7 +508,7 @@ async function scanForTeams(bytes) {
     for (let pageNum = 1; pageNum <= cachedPdfjsDoc.numPages; pageNum++) {
       const page = await cachedPdfjsDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const lines = buildLinesForPage(textContent.items);
+      const lines = buildLinesForPage(textContent.items, page.view[2] - page.view[0]);
       lines.forEach(line => {
         extractTeamNames(line.text).forEach(name => teams.add(name));
       });
@@ -596,82 +596,72 @@ function buildLines(items) {
 }
 
 // Heat sheets are commonly laid out as two (or more) side-by-side event
-// tables per page. Grouping text purely by y-coordinate merges an
-// unrelated row from one table with a row at the same height in another,
-// corrupting both. This finds a wide gap in the page's horizontal text
-// coverage that looks like the empty gutter between tables, and splits
-// items into separate column groups along it before any line-grouping
-// happens. A wide gap alone isn't enough evidence, though — the gap
-// between a table's own Team and Seed Time columns can be just as wide.
-// The real test is whether existing same-baseline rows ever straddle the
-// gap: a genuine gutter has (almost) no row reaching across it, while an
-// intra-table column gap has most/every row spanning across it.
-function splitColumns(items) {
-  if (items.length < 2) return [items];
+// tables per page, flowing independently like newspaper columns — so two
+// unrelated rows routinely land on the very same baseline. Grouping text
+// purely by y-coordinate merges them into one garbled line. A wide gap in
+// a row's own text isn't reliable evidence of the true gutter by itself:
+// generators like Hy-Tek's often right-pad a table's own columns (e.g.
+// Team -> Relay -> Seed Time) with gaps just as wide, sometimes wider,
+// than the actual gutter between tables. What's reliable is *where* the
+// gutter sits: consistently close to the page's horizontal center, while
+// intra-table column gaps sit well off to one side. Some PDF exports also
+// encode inter-word spacing as literal space characters with an inflated
+// width covering most of a line — those must be excluded, or they paper
+// over the very gap being looked for.
+function splitColumns(items, pageWidth) {
+  if (items.length < 2 || !pageWidth) return [items];
+
+  const nonWhitespace = items.filter(it => (it.str || '').trim() !== '');
+  if (nonWhitespace.length < 2) return [items];
 
   const yTolerance = 2.5;
-  const rawRows = [];
-  items.forEach(item => {
+  const rows = [];
+  nonWhitespace.forEach(item => {
     const x = item.transform[4];
     const y = item.transform[5];
     const width = item.width || 0;
-    let row = rawRows.find(r => Math.abs(r.y - y) < yTolerance);
+    let row = rows.find(r => Math.abs(r.y - y) < yTolerance);
     if (!row) {
-      rawRows.push({ y, minX: x, maxX: x + width });
-    } else {
-      row.minX = Math.min(row.minX, x);
-      row.maxX = Math.max(row.maxX, x + width);
+      row = { y, parts: [] };
+      rows.push(row);
+    }
+    row.parts.push({ x, x2: x + width });
+  });
+
+  const lo = pageWidth * 0.35, hi = pageWidth * 0.65;
+  const centeredGaps = [];
+  rows.forEach(row => {
+    row.parts.sort((a, b) => a.x - b.x);
+    for (let i = 1; i < row.parts.length; i++) {
+      const gap = row.parts[i].x - row.parts[i - 1].x2;
+      if (gap <= 15) continue;
+      const mid = (row.parts[i - 1].x2 + row.parts[i].x) / 2;
+      if (mid >= lo && mid <= hi) centeredGaps.push(mid);
     }
   });
 
-  const intervals = items
-    .map(it => [it.transform[4], it.transform[4] + (it.width || 0)])
-    .sort((a, b) => a[0] - b[0]);
-  const merged = [intervals[0].slice()];
-  for (let i = 1; i < intervals.length; i++) {
-    const [s, e] = intervals[i];
-    const last = merged[merged.length - 1];
-    if (s <= last[1] + 4) {
-      last[1] = Math.max(last[1], e);
-    } else {
-      merged.push([s, e]);
-    }
-  }
-  if (merged.length < 2) return [items];
+  // Require at least a couple of rows to agree before trusting a split;
+  // a single stray centered gap isn't enough evidence on its own.
+  if (centeredGaps.length < 2) return [items];
 
-  const totalSpread = merged[merged.length - 1][1] - merged[0][0];
-  const gaps = [];
-  for (let i = 1; i < merged.length; i++) {
-    gaps.push({ gap: merged[i][0] - merged[i - 1][1], start: merged[i - 1][1], end: merged[i][0] });
-  }
-  gaps.sort((a, b) => b.gap - a.gap);
+  centeredGaps.sort((a, b) => a - b);
+  const mid = Math.floor(centeredGaps.length / 2);
+  const gutterX = centeredGaps.length % 2 === 0
+    ? (centeredGaps[mid - 1] + centeredGaps[mid]) / 2
+    : centeredGaps[mid];
 
-  for (const candidate of gaps) {
-    // The gutter between two separate tables is reliably much wider than
-    // the gap between columns within one table, so require it to clear
-    // both an absolute and a relative bar; gaps are sorted widest-first,
-    // so once one fails the size bar, the rest will too.
-    if (candidate.gap < 50 || candidate.gap < totalSpread * 0.08) break;
-
-    const gutterMid = (candidate.start + candidate.end) / 2;
-    const straddling = rawRows.filter(r => r.minX < gutterMid && r.maxX > gutterMid).length;
-    if (rawRows.length > 0 && straddling / rawRows.length > 0.15) continue;
-
-    const left = items.filter(it => it.transform[4] < gutterMid);
-    const right = items.filter(it => it.transform[4] >= gutterMid);
-    if (left.length === 0 || right.length === 0) continue;
-    return [left, right];
-  }
-
-  return [items];
+  const left = items.filter(it => it.transform[4] < gutterX);
+  const right = items.filter(it => it.transform[4] >= gutterX);
+  if (left.length === 0 || right.length === 0) return [items];
+  return [left, right];
 }
 
 // Splits a page's items into column groups (if any) and reconstructs
 // lines within each group separately, so lines never merge across a
 // table gutter.
-function buildLinesForPage(items) {
+function buildLinesForPage(items, pageWidth) {
   let lines = [];
-  splitColumns(items).forEach(columnItems => {
+  splitColumns(items, pageWidth).forEach(columnItems => {
     lines = lines.concat(buildLines(columnItems));
   });
   return lines;
@@ -761,8 +751,8 @@ function boundsToRect(offsets, start, end, color, term) {
 // looks like a swimmer entry row (name ... seed time), a match anywhere on
 // it highlights the whole row from the start of the name through the seed
 // time instead of just the matched word.
-function findMatchesOnPage(items, terms, wholeWord, caseSensitive) {
-  const lines = buildLinesForPage(items);
+function findMatchesOnPage(items, terms, wholeWord, caseSensitive, pageWidth) {
+  const lines = buildLinesForPage(items, pageWidth);
   const matches = [];
 
   lines.forEach(line => {
@@ -851,7 +841,7 @@ generateBtn.addEventListener('click', async () => {
 
       const page = await pdfjsDoc.getPage(pageNum);
       const textContent = await page.getTextContent();
-      const matches = findMatchesOnPage(textContent.items, terms, wholeWord, caseSensitive);
+      const matches = findMatchesOnPage(textContent.items, terms, wholeWord, caseSensitive, page.view[2] - page.view[0]);
 
       const pdfLibPage = pdfLibPages[pageNum - 1];
       const padX = 1.5;
